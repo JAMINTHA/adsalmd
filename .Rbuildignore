@@ -1,0 +1,14 @@
+^main\.R$
+^simulation_study\.R$
+^simulation_large_n\.R$
+^tests/test_functions\.R$
+^outputs$
+^outputs/
+^\.RData$
+^\.Rhistory$
+^.*\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^README\.md$
+^\.git$
+^\.gitignore$

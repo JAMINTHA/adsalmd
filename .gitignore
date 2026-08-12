@@ -1,0 +1,14 @@
+# R session / workspace junk — never commit these
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Build artifacts
+*.tar.gz
+*.Rcheck/
+
+# Local run outputs (can contain results from real DataLab data — never commit)
+outputs/*
+!outputs/.gitkeep
+

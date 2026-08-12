@@ -1,0 +1,19 @@
+Package: adsalmd
+Type: Package
+Title: Adaptive Simulated Annealing Delineation of Local Labour Markets (AdSA-ALMD)
+Version: 0.1.0
+Authors@R: person("Jamintha", "Samarakoon", email = "jaminthahashini@gmail.com", role = c("aut", "cre"))
+Description: Delineates local labour market areas (LMAs) from origin-destination
+    commuting matrices and a spatial adjacency matrix, using a SARA
+    (Spatially Adaptive Random Aggregation) initial partition refined by
+    AdSA-ALMD simulated annealing and a deterministic misallocation-repair
+    pass. Provides one-shot (run_adsa_pipeline) and parallel
+    (run_adsa_pipeline_parallel) entry points that chain these steps.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends: R (>= 3.5)
+Imports:
+    parallel,
+    stats
+RoxygenNote: 7.2.3
