@@ -40,10 +40,9 @@ install.packages(c("sf", "spdep"))
 None of these three are included in this repo — #2 and #3 are ABS-published
 reference files you download yourself (search the ABS website for "ASGS
 digital boundary files" and the DZN/SA2 correspondence under Census
-geography products), and #1 is your own extract. This guide saves them to
-`dev/reference_data/` (gitignored — see `.gitignore` — so real/licensed data
-never gets committed) and references them with that path throughout; put
-them anywhere you like and adjust the paths to match.
+geography products), and #1 is your own extract. The paths below
+(`"DZN_SA2_2016_AUST.csv"` etc.) are placeholders — swap in wherever you
+actually saved each file on your machine.
 
 **All paths in this guide are relative to the repository root** — the
 directory you'd `source("dev/...")` from below, *not* the `dev/` folder
@@ -121,8 +120,8 @@ bounds, adjust the arguments — nothing here is hardcoded.
 ### 1.2 Resolve place-of-work from DZN to SA2
 
 ```r
-dzn_sa2_lookup <- read.csv("dev/reference_data/DZN_SA2_2016_AUST.csv", colClasses = "character")
-# ^ path to wherever you saved the ABS-published concordance -- see Prerequisites
+dzn_sa2_lookup <- read.csv("DZN_SA2_2016_AUST.csv", colClasses = "character")
+# ^ placeholder -- point this at wherever you saved the ABS-published concordance
 # expects columns DZN_CODE_2016, SA2_MAINCODE_2016 by default -- rename or
 # pass dzn_lookup_col / sa2_lookup_col if your file uses different headers
 
@@ -218,9 +217,9 @@ vertex — the ABS/LMA-delineation convention):
 
 ```r
 adj <- build_adjacency_from_shapefile(
-  shapefile_path = "dev/reference_data/SA2_2016_AUST_GDA2020.shp",
-  # ^ path to wherever you saved the ABS ASGS boundary files -- see Prerequisites;
-  #   .shp needs its .dbf/.shx/.prj siblings in the same folder
+  shapefile_path = "SA2_2016_AUST_GDA2020.shp",
+  # ^ placeholder -- point this at wherever you saved the ABS ASGS boundary
+  #   files (.shp needs its .dbf/.shx/.prj siblings in the same folder)
   sa2_codes      = sa2_codes,     # same vector as step 1.3, same order
   sa2_id_col     = "SA2_MAIN16",  # check names(sf::st_read(...)) for your ASGS edition
   queen          = TRUE
@@ -366,16 +365,16 @@ source("dev/validate_lma_inputs.R")
 source("dev/lma_result_to_abs_correspondence.R")
 library(adsalmd)
 
-census_raw     <- read.csv("my_census_extract.csv", colClasses = "character")           # your real DataLab extract
+census_raw     <- read.csv("my_census_extract.csv", colClasses = "character")   # your real DataLab extract
 census_raw$AGEP <- as.integer(census_raw$AGEP)
-dzn_sa2_lookup <- read.csv("dev/reference_data/DZN_SA2_2016_AUST.csv", colClasses = "character")
+dzn_sa2_lookup <- read.csv("DZN_SA2_2016_AUST.csv", colClasses = "character")    # ABS-published concordance
 
 census_filtered <- filter_census_employed(census_raw)
 census_sa2      <- convert_powp_to_sa2(census_filtered, dzn_sa2_lookup)
 sa2_codes       <- sort(unique(c(census_sa2$origin_SA2, census_sa2$destination_SA2)))
 
 W   <- build_od_matrix(census_sa2, sa2_codes)
-adj <- build_adjacency_from_shapefile("dev/reference_data/SA2_2016_AUST_GDA2020.shp", sa2_codes)
+adj <- build_adjacency_from_shapefile("SA2_2016_AUST_GDA2020.shp", sa2_codes)    # ABS ASGS boundary file
 
 qa <- validate_W_adj(W, adj, census_sa2 = census_sa2)
 stopifnot(qa$pass)
