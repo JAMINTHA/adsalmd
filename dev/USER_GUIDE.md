@@ -248,6 +248,61 @@ delineate the wrong geography (right matrices, mismatched labels).
 
 ## 4. Run the pipeline
 
+### 4.0 First, sanity-check the pipeline itself on prepared test data
+
+Before trusting `run_adsa_pipeline()` on your real `W`/`adj` from steps 1–3,
+it's worth confirming the pipeline (and your R environment/install) actually
+works, on a small dataset with a **known correct answer** — so a bad result
+later is about your data, not a broken setup.
+
+`examples/` ships exactly this: `W_N14.csv`/`adj_N14.csv` are a synthetic
+14-BGU OD/adjacency pair engineered to have two obvious commuting
+communities, and `true_sol_N14.csv` is the partition that generated them.
+**This is test data, not your data** — swap back to the real `W`, `adj`,
+`row_W`, `col_W` from steps 1–3 in 4.1 below once you've confirmed the
+pipeline recovers it:
+
+```r
+W_test        <- as.matrix(read.csv("examples/W_N14.csv", check.names = FALSE))
+adj_test      <- as.matrix(read.csv("examples/adj_N14.csv", check.names = FALSE))
+storage.mode(adj_test) <- "integer"
+true_sol_test <- read.csv("examples/true_sol_N14.csv")$true_cluster
+
+row_W_test <- rowSums(W_test)
+col_W_test <- colSums(W_test)
+
+# suggest_thresholds() only works because we happen to know the true
+# partition for this toy case -- for real data use sc_table/self-containment
+# (step 1.5) and your own Pop_min/Pop_max instead, as in 4.1 below.
+th <- suggest_thresholds(true_sol_test, W_test, row_W_test, col_W_test, margin = 0.10)
+
+res_test <- run_adsa_pipeline(
+  W = W_test, adj = adj_test, row_W = row_W_test, col_W = col_W_test,
+  SC_min = th$SC_min, Pop_min = th$Pop_min, Pop_max = th$Pop_max,
+  r = 3, L = 100, l = 20, T0_samples = 50,
+  seed = 42, verbose = FALSE
+)
+
+partitions_match(true_sol_test, res_test$best_sol)$match
+count_misallocated(res_test$best_sol, W_test, adj_test, row_W_test, col_W_test)
+```
+
+gives you:
+
+```
+> partitions_match(true_sol_test, res_test$best_sol)$match
+[1] TRUE
+> count_misallocated(res_test$best_sol, W_test, adj_test, row_W_test, col_W_test)
+[1] 0
+```
+
+If you don't get an exact match (0 misallocated, `TRUE`), something's wrong
+with the install or environment, not your Census data — sort that out
+before moving on. `examples/generate_toy_examples.R` regenerates this and
+two larger toy cases (N = 100, 520) if you want a tougher sanity check.
+
+### 4.1 Run it on your real data
+
 ```r
 row_W <- rowSums(W)
 col_W <- colSums(W)
