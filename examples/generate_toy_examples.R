@@ -146,3 +146,4 @@ cat("\nSaved to examples/: toy_N14.rds, toy_N100.rds, toy_N520.rds\n")
 cat("                     adj_N14.csv, adj_N100.csv, adj_N520.csv\n")
 cat("                     W_N14.csv, W_N100.csv, W_N520.csv\n")
 cat("                     true_sol_N14.csv, true_sol_N100.csv, true_sol_N520.csv\n")
+

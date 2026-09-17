@@ -15,5 +15,10 @@ LazyData: true
 Depends: R (>= 3.5)
 Imports:
     parallel,
-    stats
-RoxygenNote: 7.2.3
+    stats,
+    utils
+Suggests:
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+RoxygenNote: 7.3.2

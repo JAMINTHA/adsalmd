@@ -14,6 +14,26 @@
 #' (e.g. \code{result$best_sol}) recovered a known true partition, since
 #' cluster labels are arbitrary and won't line up by value.
 #'
+#' @details
+#' Builds the contingency table of \code{sol_a} against \code{sol_b} and
+#' declares a match when every row and every column has exactly one non-zero
+#' entry — that is, when the two labellings are related by a bijection. This is
+#' a strict all-or-nothing test, not a similarity measure: a single BGU in the
+#' wrong market makes \code{match} \code{FALSE}.
+#'
+#' When it fails, the returned table is the diagnosis. A row with two non-zero
+#' entries means one true market was split across two predicted ones; a column
+#' with two means two true markets were merged. The off-diagonal cell counts
+#' tell you how many BGUs are involved, so you can tell a near miss from a
+#' structurally different answer.
+#'
+#' The comparison is symmetric, but the table is labelled \code{true} (rows)
+#' and \code{predicted} (columns), so pass the known partition first.
+#'
+#' For a graded measure rather than a yes/no — the adjusted Rand index, say —
+#' use a dedicated clustering-comparison package; this function deliberately
+#' has no dependencies.
+#'
 #' @param sol_a Integer vector, e.g. the true/known partition.
 #' @param sol_b Integer vector, e.g. the algorithm's output partition.
 #'   Must be the same length as sol_a.
@@ -22,6 +42,32 @@
 #'   table -- a clean diagonal-only pattern is what a perfect match
 #'   looks like; anything off that diagonal shows exactly which BGUs
 #'   / clusters disagree).
+#'
+#' @family validation
+#' @seealso \code{\link{get_ordered_vec}()} for canonical relabelling;
+#'   \code{\link{run_adsa_pipeline}()}, whose \code{best_sol} this is meant to
+#'   check; \code{\link{count_misallocated}()} for a quality measure that needs
+#'   no known answer.
+#'
+#' @examples
+#' truth <- c(1, 1, 1, 2, 2, 2)
+#'
+#' ## Same grouping, different labels
+#' partitions_match(truth, c(7, 7, 7, 3, 3, 3))
+#'
+#' ## One BGU in the wrong market
+#' bad <- partitions_match(truth, c(1, 1, 1, 1, 2, 2))
+#' bad$match
+#' bad$table
+#'
+#' ## A market split in two: read it off the row with two entries
+#' partitions_match(truth, c(1, 1, 2, 3, 3, 3))$table
+#'
+#' ## Typical use after a run
+#' \dontrun{
+#' partitions_match(true_sol, res$best_sol)$match
+#' }
+#'
 #' @export
 partitions_match <- function(sol_a, sol_b) {
   stopifnot(length(sol_a) == length(sol_b))
@@ -44,6 +90,37 @@ partitions_match <- function(sol_a, sol_b) {
 #' search described in the paper (Table 2) -- treat the output as
 #' something to sanity-check and refine, not use blindly.
 #'
+#' @details
+#' From the reference partition's own \code{\link{build_lma_df}()} table:
+#' \describe{
+#'   \item{\code{SC_min}}{\code{min(sc) * (1 - margin)} — just below the least
+#'     self-contained market in the reference.}
+#'   \item{\code{Pop_min}}{\code{min(pop) * (1 - margin)} — just below its
+#'     smallest market.}
+#'   \item{\code{Pop_max}}{\code{max(pop) * (1 + margin)} — just above its
+#'     largest.}
+#'   \item{\code{Pop_tar}}{\code{median(pop)} — no margin applied, since a
+#'     target is not a constraint.}
+#' }
+#' All floors are clamped at 0.
+#'
+#' The logic is simply that thresholds meant to \emph{describe} a set of
+#' markets should not exclude those markets. Every bound is driven by a single
+#' extreme market, so \code{lma_df} is returned with the suggestion: look at it
+#' before accepting the numbers, because one unusual market sets each one.
+#'
+#' @section What this is not:
+#' Not a substitute for the grid search described in the paper (Table 2). It
+#' reads thresholds off one partition you already believe in, which means a
+#' poor reference yields poor thresholds with no warning. Use it to get a run
+#' started on new data, then tune.
+#'
+#' Two failure modes to watch for: a reference containing a degenerate market
+#' (a singleton with \code{sc} near 0) drags \code{SC_min} to near zero and
+#' makes the constraint toothless; and a wide population spread produces bounds
+#' so loose that \code{\link{compute_objective}()}'s hard rejections never
+#' fire. In both cases set the offending bound by hand.
+#'
 #' @param sol   Integer vector, a reference partition.
 #' @param W     Numeric OD matrix (N x N).
 #' @param row_W Numeric vector, rowSums(W).
@@ -51,11 +128,43 @@ partitions_match <- function(sol_a, sol_b) {
 #' @param margin Numeric in [0, 1), how far below the reference
 #'   partition's minimum SC/population (and above its maximum
 #'   population) to set the suggested thresholds (default 0.10, i.e.
-#'   10%).
+#'   10 percent). Use 0 for the reference's exact extremes.
 #' @return Named list: \code{SC_min}, \code{Pop_min}, \code{Pop_max},
 #'   \code{Pop_tar} (the median market population), plus \code{lma_df}
 #'   (the per-market table the suggestion was derived from, so you can
 #'   see exactly which market drove each number).
+#'
+#' @family validation
+#' @seealso \code{\link{AdSA_params}} for the study's own values;
+#'   \code{\link{build_lma_df}()} for the table this reads;
+#'   \code{\link{run_adsa_pipeline}()}, which consumes the thresholds.
+#'
+#' @examples
+#' ## Toy system: six BGUs in a line, forming two 3-BGU markets
+#' W <- matrix(1, 6, 6); W[1:3, 1:3] <- 30; W[4:6, 4:6] <- 30; diag(W) <- 60
+#' row_W <- rowSums(W); col_W <- colSums(W)
+#'
+#' th <- suggest_thresholds(c(1, 1, 1, 2, 2, 2), W, row_W, col_W)
+#' th[c("SC_min", "Pop_min", "Pop_max", "Pop_tar")]
+#'
+#' ## Always look at what drove each number
+#' th$lma_df
+#'
+#' ## A tighter margin gives the reference's exact extremes
+#' suggest_thresholds(c(1, 1, 1, 2, 2, 2), W, row_W, col_W,
+#'                    margin = 0)$SC_min
+#'
+#' ## A poor reference gives poor thresholds, silently
+#' suggest_thresholds(c(1, 1, 1, 1, 1, 2), W, row_W, col_W)$SC_min
+#'
+#' ## Feed them straight into a run
+#' \dontrun{
+#' res <- run_adsa_pipeline(W, adj, row_W, col_W,
+#'                          SC_min = th$SC_min, Pop_min = th$Pop_min,
+#'                          Pop_max = th$Pop_max, Pop_tar = th$Pop_tar,
+#'                          r = 3, L = 50L)
+#' }
+#'
 #' @export
 suggest_thresholds <- function(sol, W, row_W, col_W, margin = 0.10) {
   lma_df <- build_lma_df(sol, W, row_W, col_W)

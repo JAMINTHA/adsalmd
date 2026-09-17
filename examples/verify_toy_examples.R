@@ -51,3 +51,14 @@ cat("\n=== SUMMARY ===\n")
 cat("N14  match:", r14$check$match,  "\n")
 cat("N100 match:", r100$check$match, "\n")
 cat("N520 match:", r520$check$match, "\n")
+
+
+
+r14$result$best_sol      # integer vector, length N — the final partition
+r14$result$base_fitness  # m * GCI, for cross-method comparison
+r14$result$gci
+r14$result$n_clusters
+r14$result$lma_metrics   # per-market data.frame: cluster, pop, scss, scds, sc, n_bgus
+
+
+help(run_adsa_pipeline)

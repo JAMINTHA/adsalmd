@@ -1,19 +1,96 @@
-#' Local search refinement: reassign misallocated BGUs to a better-fitting
-#' adjacent cluster.
+# ============================================================
+# FILE: R/10_post_processing.R
+# Stage 3: deterministic local-search cleanup applied once the
+# annealing search has finished.
+# ============================================================
+
+#' Reassign misallocated BGUs to their best-fitting adjacent market
 #'
-#' Repeatedly scans every BGU. If a BGU is misallocated (per
-#' is_bgu_misallocated), it is reassigned to whichever adjacent cluster gives
-#' the highest compute_ci score, as long as the resulting partition keeps
-#' every cluster contiguous. Passes repeat until a full pass makes no further
-#' improvement, or max_iter passes have been made.
+#' Stage 3 of the pipeline: a deterministic hill-climb that moves every
+#' cohesion-misallocated BGU to the neighbouring market where it fits best,
+#' repeating until nothing more improves. Run once after the annealing search,
+#' it cleans up the border artefacts a stochastic search inevitably leaves
+#' behind.
 #'
-#' @param best_sol Integer vector, starting partition to improve.
-#' @param W        Numeric matrix (N x N).
-#' @param adj      Integer/logical matrix (N x N).
-#' @param row_W    Numeric vector, rowSums(W).
-#' @param col_W    Numeric vector, colSums(W).
-#' @param max_iter Integer, maximum number of full passes over all BGUs (default 100).
-#' @return         Integer vector, the improved (relabelled) partition.
+#' @details
+#' Each pass walks BGU 1 to N. For a BGU flagged by
+#' \code{\link{is_bgu_misallocated}()} it scores every adjacent market with
+#' \code{\link{compute_ci}()}, takes the highest-scoring one, and applies the
+#' move if every market stays contiguous. Passes repeat until one completes
+#' with no move at all, or \code{max_iter} passes have run.
+#'
+#' Two consequences of the greedy design are worth knowing:
+#' \itemize{
+#'   \item Moves take effect immediately, so a BGU later in the same pass is
+#'     evaluated against the already-updated partition. Results therefore
+#'     depend on BGU ordering — the procedure is deterministic, but not
+#'     order-independent.
+#'   \item The destination is taken as \code{which.max} of the cohesion scores
+#'     without re-testing the misallocation criterion against it, so the chosen
+#'     market is the most cohesive one, not necessarily one that passes the
+#'     \code{sc_tol} test.
+#' }
+#'
+#' This is a pure improvement pass in the cohesion sense, but it can lower the
+#' objective: nothing here checks \code{Pop_min}, \code{Pop_max} or
+#' self-containment, so a move can push a market outside its population bounds.
+#' Re-score with \code{\link{compute_objective}()} afterwards if feasibility
+#' matters to you. \code{\link{run_adsa_pipeline}()} recomputes \code{gci},
+#' \code{base_fitness}, \code{n_clusters} and \code{lma_metrics} from the
+#' refined partition for exactly this reason — but it does not re-check the
+#' population bounds.
+#'
+#' @section Versus fix_misallocations():
+#' \code{\link{fix_misallocations}()} is the same sweep with population guards,
+#' used \emph{inside} the annealing loop where an infeasible partition would
+#' simply be discarded. This one is the unguarded post-search version. See that
+#' function's help page for the full comparison.
+#'
+#' @param best_sol Integer vector, the partition to improve (length N).
+#' @param W Numeric \code{N x N} origin-destination matrix.
+#' @param adj Integer/logical \code{N x N} adjacency matrix.
+#' @param row_W Numeric vector, \code{rowSums(W)}.
+#' @param col_W Numeric vector, \code{colSums(W)}.
+#' @param max_iter Integer, maximum full passes over all BGUs (default 100).
+#'   Convergence is usually reached in a handful; hitting the cap suggests two
+#'   BGUs are being swapped back and forth.
+#' @return Integer vector of length N. Relabelled by
+#'   \code{\link{get_ordered_vec}()} if any move was made; otherwise
+#'   \code{best_sol} exactly as supplied. The market count can fall if a market
+#'   is emptied.
+#'
+#' @family post-processing
+#' @seealso \code{\link{fix_misallocations}()} for the population-aware variant;
+#'   \code{\link{count_misallocated}()} to measure before and after;
+#'   \code{\link{run_adsa_pipeline}()}, which calls this as stage 3.
+#'
+#' @examples
+#' ## Toy system: six BGUs in a line, forming two 3-BGU markets
+#' adj <- matrix(0L, 6, 6); adj[cbind(1:5, 2:6)] <- 1L; adj <- adj + t(adj)
+#' W <- matrix(1, 6, 6); W[1:3, 1:3] <- 30; W[4:6, 4:6] <- 30; diag(W) <- 60
+#' row_W <- rowSums(W); col_W <- colSums(W)
+#'
+#' ## BGU 4 was left in the wrong market by the search
+#' sol <- c(1, 1, 1, 1, 2, 2)
+#' count_misallocated(sol, W, adj, row_W, col_W)
+#'
+#' refined <- refine_misallocated_bgus(sol, W, adj, row_W, col_W)
+#' refined
+#' count_misallocated(refined, W, adj, row_W, col_W)
+#'
+#' ## Cohesion improves...
+#' compute_gci(sol, W, row_W, col_W)
+#' compute_gci(refined, W, row_W, col_W)
+#'
+#' ## ...but re-check feasibility yourself, since this pass ignores it
+#' build_lma_df(refined, W, row_W, col_W)
+#'
+#' ## An already-clean partition is returned untouched
+#' identical(refine_misallocated_bgus(c(1, 1, 1, 2, 2, 2), W, adj,
+#'                                    row_W, col_W),
+#'           c(1, 1, 1, 2, 2, 2))
+#'
+#' @export
 refine_misallocated_bgus <- function(best_sol, W, adj, row_W, col_W, max_iter = 100L) {
   
   improved <- TRUE

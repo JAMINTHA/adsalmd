@@ -1,11 +1,17 @@
 ^main\.R$
 ^simulation_study\.R$
 ^simulation_large_n\.R$
+^test_census_convert\.R$
+^dev$
+^dev/
 ^tests/test_functions\.R$
 ^outputs$
 ^outputs/
 ^\.RData$
 ^\.Rhistory$
+^examples/\.RData$
+^examples/\.Rhistory$
+^\.claude$
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
