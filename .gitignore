@@ -12,3 +12,8 @@
 outputs/*
 !outputs/.gitkeep
 
+# Real ABS reference data you download yourself (DZN-SA2 concordance, SA2
+# shapefiles, real Census extracts) — large/licensed, never commit
+dev/reference_data/*
+!dev/reference_data/.gitkeep
+

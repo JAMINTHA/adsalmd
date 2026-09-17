@@ -41,12 +41,16 @@ Person-level microdata with the exact ABS Census Dictionary column names:
 | `POWP`   | Place of Work, coded to Destination Zone (DZN)         |
 | `IFPOWP` | Imputation flag for POWP (`0` = observed, `1` = imputed) |
 
-Plus two reference datasets you provide:
+Plus two reference datasets you provide (not included in this repo — save
+them under `dev/reference_data/`, which is gitignored, and adjust paths
+below if you put them elsewhere):
 
 - A **DZN → SA2 concordance** (ABS-published `DZN_SA2_<year>_AUST.csv`), to
   resolve `POWP`'s DZN code to an SA2.
 - An **SA2 boundary shapefile** (ABS ASGS digital boundary file), to derive
   adjacency.
+
+All paths below are relative to the repository root, not this `dev/` folder.
 
 ## Pipeline
 
@@ -69,7 +73,7 @@ sc_table <- compute_self_containment(W)
 
 # 6. Build adjacency from an SA2 boundary shapefile
 adj <- build_adjacency_from_shapefile(
-  "SA2_2016_AUST_GDA2020.shp", sa2_codes, sa2_id_col = "SA2_MAIN16"
+  "dev/reference_data/SA2_2016_AUST_GDA2020.shp", sa2_codes, sa2_id_col = "SA2_MAIN16"
 )
 
 # 7. QA before handing off to the pipeline
