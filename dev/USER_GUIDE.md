@@ -66,6 +66,22 @@ matching names as arguments — see step-by-step below):
 | `POWP` | Place of Work | **DZN**-coded, needs conversion (step 1.2) |
 | `IFPOWP` | Imputation flag for POWP | `0` = observed, `1` = imputed |
 
+**Don't have an extract to hand yet?** `dev/sample_data/` ships a small
+synthetic one (1,000 fake person records, 10 Brisbane SA2s) with these exact
+column names and coding scheme, plus a matching DZN → SA2 lookup, so you can
+run this entire section — and check the helper functions actually work —
+before you've pulled a real DataLab extract:
+
+```r
+census_raw     <- read.csv("dev/sample_data/census_extract_sample.csv", colClasses = "character")
+dzn_sa2_lookup <- read.csv("dev/sample_data/DZN_SA2_2016_AUST_sample.csv", colClasses = "character")
+```
+
+Everything from here through 1.5 runs unchanged on this sample data; see
+1.6 below for the full sample walkthrough with expected output. When you're
+ready to switch to your own data, it's a one-line swap — same column names
+throughout:
+
 ```r
 census_raw <- read.csv("my_census_extract.csv", colClasses = "character")
 ```
@@ -100,6 +116,10 @@ dzn_sa2_lookup <- read.csv("DZN_SA2_2016_AUST.csv", colClasses = "character")
 census_sa2 <- convert_powp_to_sa2(census_filtered, dzn_sa2_lookup)
 ```
 
+(If you loaded `dzn_sa2_lookup` from `dev/sample_data/` above, skip the
+`read.csv()` line here — it's already in your environment — and go straight
+to `convert_powp_to_sa2()`.)
+
 `census_sa2` now has `origin_SA2` (= `PURP`) and `destination_SA2` (from
 `POWP` via the DZN lookup). Rows whose `POWP` didn't match any DZN in the
 lookup are dropped by default (`drop_unmatched = TRUE`).
@@ -133,6 +153,48 @@ achievable for your data before you spend a run finding out:
 sc_table <- compute_self_containment(W)
 summary(sc_table$SC)
 ```
+
+### 1.6 Sample-data walkthrough (expected output)
+
+Running 1–1.5 above against `dev/sample_data/` end to end:
+
+```r
+source("dev/abs_census_to_od.R")
+
+census_raw     <- read.csv("dev/sample_data/census_extract_sample.csv", colClasses = "character")
+census_raw$AGEP <- as.integer(census_raw$AGEP)
+dzn_sa2_lookup <- read.csv("dev/sample_data/DZN_SA2_2016_AUST_sample.csv", colClasses = "character")
+
+census_filtered <- filter_census_employed(census_raw)
+census_sa2      <- convert_powp_to_sa2(census_filtered, dzn_sa2_lookup)
+sa2_codes       <- sort(unique(c(census_sa2$origin_SA2, census_sa2$destination_SA2)))
+
+W        <- build_od_matrix(census_sa2, sa2_codes)
+sc_table <- compute_self_containment(W)
+```
+
+gives you:
+
+```
+> nrow(census_raw)
+[1] 1000
+> nrow(census_filtered)      # after the employed / working-age / non-imputed filter
+[1] 400
+> dim(W)
+[1] 10 10
+> sum(W)                     # equals nrow(census_sa2) -- every filtered record landed somewhere
+[1] 400
+> summary(sc_table$SC)
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max.
+0.02381 0.03237 0.05583 0.07002 0.11076 0.12963
+```
+
+Self-containment is low across the board here because the sample data
+assigns `PURP`/`POWP` uniformly at random — real commuting data is far more
+spatially clustered. Don't read anything into the numbers themselves; the
+point is that the pipeline runs and `W` comes out the right shape.
+`dev/sample_data/generate_sample_data.R` regenerates both CSVs if you want
+to tweak the scenario (more SA2s, a different sample size, etc).
 
 ---
 
