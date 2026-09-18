@@ -151,3 +151,69 @@ attach_lma_metrics <- function(correspondence, sol, lma_metrics,
     all.x = TRUE, sort = FALSE
   )
 }
+
+#' Join the correspondence table onto SA2 geometry and write a map-ready
+#' shapefile
+#'
+#' \code{\link{build_sa2_lma_correspondence}()} produces a plain data.frame --
+#' the ABS correspondence file convention, and what \code{write.csv()}
+#' exports. That's not map-ready on its own: nothing ties `LMA_CODE_<year>`
+#' back to SA2 *geometry*. This left-joins a correspondence table (or
+#' \code{\link{attach_lma_metrics}()}'s output) onto an SA2 boundary
+#' shapefile by SA2 code and writes the result out as a shapefile, so it
+#' opens directly in QGIS/ArcGIS with the LMA assignment (and any attached
+#' metrics) as attribute columns you can symbolise or dissolve by.
+#'
+#' @param correspondence data.frame, one row per SA2 -- typically
+#'   \code{corr_full} / \code{\link{attach_lma_metrics}()}'s output, i.e.
+#'   already covering every SA2 in \code{sa2_codes_full} (see
+#'   \code{USER_GUIDE.md} step 5.1 -- an SA2 missing from `correspondence`
+#'   is simply dropped from the output, not an error).
+#' @param shapefile_path Path to the SA2 boundary shapefile to join onto --
+#'   the same one \code{sa2_codes_full} was built from (the *full* shapefile
+#'   from step 5.1, not the trimmed one from step 2, if you did that step).
+#' @param out_path Path to write the joined shapefile to (`.shp`; sidecar
+#'   `.dbf`/`.shx`/`.prj` files are written alongside it automatically).
+#' @param sa2_code_col Column in `correspondence` holding the SA2 code
+#'   (default `"SA2_MAINCODE_2016"`, matching
+#'   \code{\link{build_sa2_lma_correspondence}()}'s default `sa2_year`).
+#' @param sa2_id_col Column in the shapefile holding the SA2 code (default
+#'   `"SA2_MAIN16"`, matching \code{\link{build_adjacency_from_shapefile}()}'s
+#'   default).
+#' @return Invisibly, the joined `sf` object (also written to `out_path`).
+#' @details The shapefile format truncates column names to 10 characters (a
+#'   DBF limitation) -- if `correspondence` has several long or similarly-
+#'   prefixed columns (e.g. from \code{attach_lma_metrics()}'s `LMA_`
+#'   columns), check `names(sf::st_read(out_path))` afterwards to see what
+#'   they became, and rename before calling this if that's ambiguous.
+export_lma_shapefile <- function(correspondence, shapefile_path, out_path,
+                                  sa2_code_col = "SA2_MAINCODE_2016",
+                                  sa2_id_col = "SA2_MAIN16") {
+  stopifnot(requireNamespace("sf", quietly = TRUE))
+  stopifnot(sa2_code_col %in% names(correspondence))
+
+  sa2_shp <- sf::st_read(shapefile_path, quiet = TRUE)
+  if (!sa2_id_col %in% names(sa2_shp)) {
+    stop(sprintf(
+      "`%s` not found in shapefile. Available columns: %s",
+      sa2_id_col, paste(names(sa2_shp), collapse = ", ")
+    ))
+  }
+
+  missing <- setdiff(correspondence[[sa2_code_col]], sa2_shp[[sa2_id_col]])
+  if (length(missing) > 0) {
+    stop(sprintf(
+      "%d SA2 code(s) in `correspondence` not found in shapefile: %s",
+      length(missing), paste(missing, collapse = ", ")
+    ))
+  }
+
+  joined <- merge(
+    sa2_shp, correspondence,
+    by.x = sa2_id_col, by.y = sa2_code_col,
+    all.x = FALSE   # keep only the SA2s actually in `correspondence`
+  )
+
+  sf::st_write(joined, out_path, delete_dsn = TRUE, quiet = TRUE)
+  invisible(joined)
+}

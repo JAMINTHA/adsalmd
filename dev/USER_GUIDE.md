@@ -21,6 +21,22 @@ below.
 
 ## 0. Prerequisites
 
+**Working directory**
+
+Set your R working directory to the root of this repository before running
+anything below — every path in this guide (`"dev/..."`, `"examples/..."`,
+`"my_census_extract.csv"`, etc.) is written relative to that root, not to
+wherever R happened to start:
+
+```r
+setwd("C:/path/to/your/checkout/of/AdSA-ALMD")
+# ^ placeholder -- point this at wherever you cloned/downloaded this repo
+getwd()   # sanity check: should print the folder containing dev/, R/, examples/
+```
+
+If you opened this project via the `AdSA-ALMD.Rproj` file in RStudio, your
+working directory is already set correctly and you can skip this step.
+
 **R packages**
 - Base R covers everything except the adjacency step.
 - `sf` and `spdep`, only for building `adj` from a shapefile.
@@ -88,10 +104,10 @@ census_raw     <- read.csv("dev/sample_data/census_extract_sample.csv", colClass
 dzn_sa2_lookup <- read.csv("dev/sample_data/DZN_SA2_2016_AUST_sample.csv", colClasses = "character")
 ```
 
-Everything from here through 1.5 runs unchanged on this sample data; see
-1.6 below for the full sample walkthrough with expected output. When you're
-ready to switch to your own data, it's a one-line swap — same column names
-throughout:
+Everything from here through 1.6 runs unchanged on this sample data (step
+1.5 is a no-op for it — see the note there); see 1.7 below for the full
+sample walkthrough with expected output. When you're ready to switch to
+your own data, it's a one-line swap — same column names throughout:
 
 ```r
 census_raw <- read.csv("my_census_extract.csv", colClasses = "character")
@@ -155,7 +171,47 @@ W <- build_od_matrix(census_sa2, sa2_codes)
 # W[i, j] = number of employed residents of sa2_codes[i] working in sa2_codes[j]
 ```
 
-### 1.5 (Optional but recommended) look at self-containment
+### 1.5 Remove BGUs with no commuting ties at all
+
+**This only matters if `sa2_codes` (step 1.3) covers more than what shows up
+in `census_sa2`** — i.e. you took the note above and supplied your own
+full study-area list of SA2 codes (the right thing to do for a real
+ABS-style correspondence product, since the final table should cover every
+SA2 in scope, not just the ones with recorded commuters). If you built
+`sa2_codes` the default way, purely from `census_sa2`'s own values, skip
+this step — every SA2 in it already has at least one recorded resident or
+worker by construction.
+
+A full study-area list will usually include a few SA2s where literally
+nobody lives **and** nobody works — a national park, an industrial or port
+zone, an uninhabited island. In `W` these show up as an all-zero row *and*
+an all-zero column: no in-commuting, no out-commuting, no tie to the
+network at all. That's a different problem from low self-containment (§1.6
+below) — a poorly self-contained SA2 still has commuters flowing in and
+out, which is exactly what SARA's merging step is for. A BGU with **no**
+flow at all gives the pipeline nothing to decide *which* market it belongs
+to, so it needs to come out before you build `adj` or run anything:
+
+```r
+row_W <- rowSums(W)
+col_W <- colSums(W)
+empty_bgu <- sa2_codes[row_W == 0 & col_W == 0]
+
+if (length(empty_bgu) > 0) {
+  message(length(empty_bgu), " SA2(s) have no residents and no jobs recorded -- ",
+          "setting aside: ", paste(empty_bgu, collapse = ", "))
+}
+
+sa2_codes <- setdiff(sa2_codes, empty_bgu)
+W <- W[sa2_codes, sa2_codes]
+```
+
+Keep `empty_bgu` (even if it's `character(0)`) — you'll need it in step 5.1
+to fold these SA2s back into the final correspondence table by geographic
+proximity, since they have no commuting flow to place them by. Build `adj`
+(§2 below) from this same trimmed `sa2_codes`, not the original one.
+
+### 1.6 (Optional but recommended) look at self-containment
 
 This is the same self-containment figure the pipeline's `SC_min` threshold
 is checked against, so looking at it now tells you what thresholds are even
@@ -166,9 +222,42 @@ sc_table <- compute_self_containment(W)
 summary(sc_table$SC)
 ```
 
-### 1.6 Sample-data walkthrough (expected output)
+**Getting a data-driven `Pop_min`, not a guess**
 
-Running 1–1.5 above against `dev/sample_data/` end to end:
+`Pop_min` is a floor on final *LMA* population, but `sc_table` only has
+per-SA2 numbers — so don't read `Pop_min` straight off it. What it does give
+you is a defensible starting floor: population and self-containment are
+correlated (small SA2s leak commuters to bigger neighbours), so the smallest
+population among the SA2s that *already* clear your chosen `SC_min` on their
+own tells you the smallest population at which adequate self-containment is
+empirically achievable in this data:
+
+```r
+SC_min <- 0.55   # whatever threshold you settled on above
+
+self_contained <- sc_table[!is.na(sc_table$SC) & sc_table$SC >= SC_min, ]
+Pop_min <- if (nrow(self_contained) > 0) min(self_contained$W_iG) else NA
+Pop_min
+```
+
+Because SARA only ever *merges* SA2s to fix a market that's too small or not
+self-contained enough (see §4), every LMA in the final result will have a
+population at least this large — this is a genuine floor, not a target.
+If `self_contained` comes back empty (common on small samples, e.g. the
+bundled `dev/sample_data/`, where `SC` never gets near 0.55 — see 1.7 below),
+no SA2 clears the bar on its own; fall back to a policy-based minimum instead
+(a stated ABS/labour-market adequacy convention, or the value used in a prior
+study of the same region) until you have real data to check it against. Once
+you have an actual `res$best_sol`, `suggest_thresholds()` (§4.0) gives you a
+second, independent read on `Pop_min` from the realised partition — the two
+won't match exactly, but they should be in the same ballpark; a large gap is
+worth investigating before you trust the run.
+
+### 1.7 Sample-data walkthrough (expected output)
+
+Running 1.1–1.6 above against `dev/sample_data/` end to end (the sample
+data's `sa2_codes` is derived purely from `census_sa2`, so step 1.5 has
+nothing to remove here — it's not shown below):
 
 ```r
 source("dev/abs_census_to_od.R")
@@ -220,7 +309,7 @@ adj <- build_adjacency_from_shapefile(
   shapefile_path = "SA2_2016_AUST_GDA2020.shp",
   # ^ placeholder -- point this at wherever you saved the ABS ASGS boundary
   #   files (.shp needs its .dbf/.shx/.prj siblings in the same folder)
-  sa2_codes      = sa2_codes,     # same vector as step 1.3, same order
+  sa2_codes      = sa2_codes,     # the trimmed vector from step 1.5 (or 1.3 if you skipped it), same order
   sa2_id_col     = "SA2_MAIN16",  # check names(sf::st_read(...)) for your ASGS edition
   queen          = TRUE
 )
@@ -273,7 +362,7 @@ col_W_test <- colSums(W_test)
 
 # suggest_thresholds() only works because we happen to know the true
 # partition for this toy case -- for real data use sc_table/self-containment
-# (step 1.5) and your own Pop_min/Pop_max instead, as in 4.1 below.
+# (step 1.6) and your own Pop_min/Pop_max instead, as in 4.1 below.
 th <- suggest_thresholds(true_sol_test, W_test, row_W_test, col_W_test, margin = 0.10)
 
 res_test <- run_adsa_pipeline(
@@ -310,7 +399,7 @@ col_W <- colSums(W)
 res <- run_adsa_pipeline(
   W = W, adj = adj, row_W = row_W, col_W = col_W,
   SC_min  = 0.55,     # from sc_table above -- pick a threshold most SA2s can plausibly meet
-  Pop_min = 5000,     # minimum viable labour market population
+  Pop_min = 5000,     # from sc_table in step 1.6 -- see "Getting a data-driven Pop_min" there
   Pop_max = 50000,    # maximum, or leave as Inf
   r = 3,
   L = 20, l = 10, T0_samples = 20,   # small first: size the run before scaling up
@@ -353,16 +442,55 @@ ABS geography correspondence files (e.g. "SA2 (2016) to SA4 (2016)
 Correspondence") are one row per lower-level region, with the higher-level
 region's code and name, and `RATIO_FROM_TO` / `RATIO_TO_FROM` columns.
 `build_sa2_lma_correspondence()` produces the same layout for your
-delineation, treating each LMA as the "higher-level region":
+delineation, treating each LMA as the "higher-level region". This table
+(§5.2–5.4) is the authoritative output; §5.5 optionally also attaches the
+cluster IDs to the SA2 shapefile geometry itself, for mapping:
+
+### 5.1 Reattach the BGUs you set aside in step 1.5
+
+`res$best_sol` only covers the trimmed `sa2_codes` — the zero-flow SA2s in
+`empty_bgu` (step 1.5) never went into the pipeline, so they're not in
+`res$best_sol` either. But a real ABS-style correspondence table should
+still list every SA2 in the study area, occupied or not — you just can't
+place these by commuting flow, since they have none. The next best thing is
+geographic proximity: `reattach_isolated_bgus()` assigns each one to the LMA
+of its nearest neighbour — first by shared border, falling back to nearest
+centroid distance in the rare case none of its borders made it into the run
+either (see `dev/abs_adjacency_from_shapefile.R` for the full logic, or
+`?reattach_isolated_bgus` once sourced).
+
+It's safe to call even if `empty_bgu` is empty (returns nothing to add) —
+always run this, then use the `_full` variables from here on instead of
+`sa2_codes`/`res$best_sol`/`row_W`:
+
+```r
+empty_labels <- reattach_isolated_bgus(
+  empty_codes    = empty_bgu,             # from step 1.5
+  sol            = res$best_sol,
+  sa2_codes      = sa2_codes,
+  shapefile_path = "SA2_2016_AUST_GDA2020.shp",   # the *full* shapefile again --
+  sa2_id_col     = "SA2_MAIN16"                   # not subset to sa2_codes this time
+)
+
+sa2_codes_full <- c(sa2_codes, empty_bgu)
+sol_full       <- c(res$best_sol, empty_labels)
+row_W_full     <- c(row_W, setNames(rep(0L, length(empty_bgu)), empty_bgu))
+```
+
+Each reattached SA2 ends up with `RATIO_TO_FROM = 0` in the correspondence
+table below — correct, since it contributes no population/commuters to its
+LMA, it just needed *somewhere* to belong geographically.
+
+### 5.2 Build the correspondence table
 
 ```r
 sa2_names <- setNames(my_sa2_lookup$SA2_NAME_2016, my_sa2_lookup$SA2_MAINCODE_2016)
 
 corr <- build_sa2_lma_correspondence(
-  sol         = res$best_sol,
-  sa2_codes   = sa2_codes,
-  sa2_names   = sa2_names[sa2_codes],   # optional; omit if you don't have names
-  row_W       = row_W,                  # population proxy for RATIO_TO_FROM
+  sol         = sol_full,
+  sa2_codes   = sa2_codes_full,
+  sa2_names   = sa2_names[sa2_codes_full],   # optional; omit if you don't have names
+  row_W       = row_W_full,             # population proxy for RATIO_TO_FROM
   lma_code_prefix = "LMA",
   sa2_year = "2016", lma_year = "2016"
 )
@@ -381,25 +509,29 @@ head(corr)
   real ERP population vector via `population = ` for a more accurate figure
   than the commuting-flow proxy.
 
-If you supplied real SA2 population instead of the `row_W` proxy:
+If you supplied real SA2 population instead of the `row_W` proxy — note this
+needs a value for the reattached SA2s too, `0` is correct for the same
+reason as `row_W_full` above:
 
 ```r
+my_sa2_population_full <- c(my_sa2_population, setNames(rep(0, length(empty_bgu)), empty_bgu))
+
 corr <- build_sa2_lma_correspondence(
-  sol = res$best_sol, sa2_codes = sa2_codes, sa2_names = sa2_names[sa2_codes],
-  population = my_sa2_population   # named or positional, aligned to sa2_codes
+  sol = sol_full, sa2_codes = sa2_codes_full, sa2_names = sa2_names[sa2_codes_full],
+  population = my_sa2_population_full   # named or positional, aligned to sa2_codes_full
 )
 ```
 
-### 5.1 (Optional) attach per-LMA quality metrics
+### 5.3 (Optional) attach per-LMA quality metrics
 
 To carry `pop`/`sc` etc. from `res$lma_metrics` alongside each SA2's
 assignment (handy for a single reportable table):
 
 ```r
-corr_full <- attach_lma_metrics(corr, res$best_sol, res$lma_metrics)
+corr_full <- attach_lma_metrics(corr, sol_full, res$lma_metrics)
 ```
 
-### 5.2 Export
+### 5.4 Export
 
 ```r
 write.csv(corr_full, "SA2_to_LMA_2016_Correspondence.csv", row.names = FALSE)
@@ -408,6 +540,34 @@ write.csv(corr_full, "SA2_to_LMA_2016_Correspondence.csv", row.names = FALSE)
 That CSV is now in the same shape analysts and downstream tools expect from
 an ABS correspondence product — joinable to any other SA2-keyed dataset, and
 readable without any `adsalmd`-specific knowledge.
+
+### 5.5 (Optional) attach cluster IDs to the shapefile, for mapping
+
+The CSV above is a *table* — it has no geometry, so nothing about it opens
+as a map. If you want the LMA delineation visible in QGIS/ArcGIS (to eyeball
+the result, or hand to someone who will), `export_lma_shapefile()` joins
+`corr_full` onto the SA2 boundary shapefile by SA2 code and writes the
+result back out as a shapefile, with `LMA_CODE_2016` (and, if you did 5.3,
+the attached metrics) as ordinary attribute columns you can symbolise or
+dissolve by:
+
+```r
+export_lma_shapefile(
+  correspondence = corr_full,
+  shapefile_path = "SA2_2016_AUST_GDA2020.shp",   # the full shapefile again, as in 5.1
+  out_path       = "SA2_to_LMA_2016.shp",
+  sa2_code_col   = "SA2_MAINCODE_2016",            # matches build_sa2_lma_correspondence()'s sa2_year
+  sa2_id_col     = "SA2_MAIN16"                    # matches step 2's sa2_id_col
+)
+```
+
+**Shapefile column names are silently truncated to 10 characters** (a DBF
+limitation, not a bug) — e.g. `LMA_NAME_2016` becomes `LMA_NAME_`. Run
+`names(sf::st_read("SA2_to_LMA_2016.shp"))` afterwards if you need to know
+what a long or `attach_lma_metrics()`-prefixed column actually got called.
+This is exactly the same limitation ABS's own shapefile products have — the
+CSV correspondence table from 5.4 remains the authoritative, unambiguous
+output; treat this shapefile as a mapping convenience, not a replacement.
 
 ---
 
@@ -428,7 +588,15 @@ census_filtered <- filter_census_employed(census_raw)
 census_sa2      <- convert_powp_to_sa2(census_filtered, dzn_sa2_lookup)
 sa2_codes       <- sort(unique(c(census_sa2$origin_SA2, census_sa2$destination_SA2)))
 
-W   <- build_od_matrix(census_sa2, sa2_codes)
+W <- build_od_matrix(census_sa2, sa2_codes)
+
+# step 1.5 -- only removes anything if sa2_codes came from a full
+# study-area list rather than purely from census_sa2 (see step 1.3)
+row_W <- rowSums(W); col_W <- colSums(W)
+empty_bgu <- sa2_codes[row_W == 0 & col_W == 0]
+sa2_codes <- setdiff(sa2_codes, empty_bgu)
+W <- W[sa2_codes, sa2_codes]
+
 adj <- build_adjacency_from_shapefile("SA2_2016_AUST_GDA2020.shp", sa2_codes)    # ABS ASGS boundary file
 
 qa <- validate_W_adj(W, adj, census_sa2 = census_sa2)
@@ -442,9 +610,21 @@ res <- run_adsa_pipeline(
   L = 1000, seed = 2026
 )
 
-corr <- build_sa2_lma_correspondence(res$best_sol, sa2_codes, row_W = row_W)
-full <- attach_lma_metrics(corr, res$best_sol, res$lma_metrics)
+# step 5.1 -- reattach empty_bgu by geographic proximity; safe to call
+# even when empty_bgu is empty (returns nothing to add)
+empty_labels <- reattach_isolated_bgus(
+  empty_bgu, res$best_sol, sa2_codes, "SA2_2016_AUST_GDA2020.shp"
+)
+sa2_codes_full <- c(sa2_codes, empty_bgu)
+sol_full       <- c(res$best_sol, empty_labels)
+row_W_full     <- c(row_W, setNames(rep(0L, length(empty_bgu)), empty_bgu))
+
+corr <- build_sa2_lma_correspondence(sol_full, sa2_codes_full, row_W = row_W_full)
+full <- attach_lma_metrics(corr, sol_full, res$lma_metrics)
 write.csv(full, "SA2_to_LMA_2016_Correspondence.csv", row.names = FALSE)
+
+# step 5.5 (optional) -- same delineation, joined onto SA2 geometry for mapping
+export_lma_shapefile(full, "SA2_2016_AUST_GDA2020.shp", "SA2_to_LMA_2016.shp")
 ```
 
 ---
@@ -459,6 +639,8 @@ write.csv(full, "SA2_to_LMA_2016_Correspondence.csv", row.names = FALSE)
 | All `SC` values in `compute_self_containment()` are low | Your SA2s might be too small relative to real commuting patterns for the chosen study area — expect to need SARA/annealing to aggregate several SA2s per LMA; don't set `SC_min` above what's achievable pre-aggregation. |
 | `lma_metrics` shows populations outside `Pop_min`/`Pop_max` after `run_adsa_pipeline()` | Expected — stage 3 (refinement) doesn't enforce population bounds (see `?run_adsa_pipeline`, "Details"). Re-check and treat out-of-bounds LMAs as needing another pass or manual review. |
 | Correspondence `RATIO_TO_FROM` looks wrong/uniform | You didn't pass `population` or `row_W`, so every SA2 was weighted equally within its LMA (a warning is printed when this happens). |
+| Some SA2s missing from the final correspondence table | You built `sa2_codes` from a full study-area list (step 1.3) and set some aside in step 1.5 for having no residents *and* no jobs recorded. Reattach them via step 5.1 before exporting — `res$best_sol`/`sa2_codes` alone will never cover them. |
+| Column missing/renamed after `export_lma_shapefile()` | Expected — the shapefile format truncates column names to 10 characters. Check `names(sf::st_read(out_path))` for what it actually got called, or use the CSV from step 5.4 (untruncated) as the authoritative output. |
 
 ## 8. Where each piece lives
 
@@ -467,9 +649,12 @@ write.csv(full, "SA2_to_LMA_2016_Correspondence.csv", row.names = FALSE)
 | Filter microdata | `filter_census_employed()` | `dev/abs_census_to_od.R` |
 | DZN → SA2 | `convert_powp_to_sa2()` | `dev/abs_census_to_od.R` |
 | Build `W` | `build_od_matrix()` | `dev/abs_census_to_od.R` |
+| Remove zero-flow BGUs | inline code, no helper function | this guide, §1.5 |
 | Self-containment diagnostics | `compute_self_containment()` | `dev/abs_census_to_od.R` |
 | Build `adj` | `build_adjacency_from_shapefile()` | `dev/abs_adjacency_from_shapefile.R` |
 | QA `W`/`adj` | `validate_W_adj()` | `dev/validate_lma_inputs.R` |
 | Run the pipeline | `run_adsa_pipeline()` / `run_adsa_pipeline_parallel()` | public package (`R/11_pipeline.R`) |
+| Reattach zero-flow BGUs by proximity | `reattach_isolated_bgus()` | `dev/abs_adjacency_from_shapefile.R` |
 | Result → correspondence table | `build_sa2_lma_correspondence()` | `dev/lma_result_to_abs_correspondence.R` |
 | Attach LMA metrics | `attach_lma_metrics()` | `dev/lma_result_to_abs_correspondence.R` |
+| Attach cluster IDs to the shapefile, for mapping | `export_lma_shapefile()` | `dev/lma_result_to_abs_correspondence.R` |
