@@ -1,5 +1,7 @@
 # AdSA-ALMD user guide: from ABS Census data to a labour market delineation and back
 
+---
+
 This is an end-to-end walkthrough for someone who has ABS Census microdata
 (PLIDA / DataLab) and wants to:
 
